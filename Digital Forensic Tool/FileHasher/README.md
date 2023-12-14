@@ -10,4 +10,4 @@
 No additional installation is required as `FileHasher.py` uses Python's standard libraries.
 
 ## Usage
-To use the script, navigate to the directory containing `FileHasher.py` and run the following command in the terminal: python3 FileHasher.py -f `File Path\File Name`
+To use the script, navigate to the directory containing `FileHasher.py` and run the following command in the terminal: `python3 FileHasher.py -f "File Path\File Name"`
