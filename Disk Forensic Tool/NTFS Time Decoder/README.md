@@ -10,4 +10,4 @@
 No additional installation is required as `DateTimeDecoder.py` utilizes Python's standard libraries.
 
 ## Usage
-To use the script, save it as `DateTimeDecoder.py` and execute the following command in the terminal: 
+To use the script, save it as `DateTimeDecoder.py` and execute the following command in the terminal: `python3 timeDecoder.py "0xXXXXXXXXXXXXXXXXXX"`
