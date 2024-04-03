@@ -3,7 +3,7 @@ import sys
 
 def partition_parser(file_path, boot_code_size, sector_size):
     with open(file_path, 'rb') as f:
-        f.seek(boot_code_size, whence = 0)  # Jump Boot Code Area
+        f.seek(boot_code_size, 0)  # Jump Boot Code Area
 
         partition_table_format = '<B3sB3sII'  # Format of Partition Table Entry
         partition_table_size = struct.calcsize(partition_table_format)
@@ -20,8 +20,8 @@ def partition_parser(file_path, boot_code_size, sector_size):
 
             if (fields[2] == 0x05):
                 number_of_partition += 1
-                f.seek(int(fields[4]) * sector_size + boot_code_size, whence = 0)
-                current_sector = int(fields[4])
+                current_sector += int(fields[4])
+                f.seek(current_sector * sector_size + boot_code_size, 0)
                 continue
 
             number_of_partition += 1
@@ -29,10 +29,10 @@ def partition_parser(file_path, boot_code_size, sector_size):
 def print_partition_data(number_of_partition, fields, current_sector, sector_size):
     print(f"\n========== Partition {number_of_partition} ==========")
     print(f"Boot Flag : {True if fields[0] == 0x80 else False} ")
-    print(f"Starting CHS Address : {''.join(f'{byte:02x}' for byte in fields[1])}")  # Print Hex Value & Continuous
+    print(f"Starting CHS Address : {''.join(f'{byte:02x}' for byte in fields[1])} (Little Endian)")  # Print Hex Value & Continuous
     print(f"Partition Type : {fields[2]:02x} ({partition_type(fields[2])})")
-    print(f"Ending CHS Address : {''.join(f'{byte:02x}' for byte in fields[3])}")
-    print(f"Starting LBA : {current_sector * sector_size + int(fields[4])}")
+    print(f"Ending CHS Address : {''.join(f'{byte:02x}' for byte in fields[3])} (Little Endian)")
+    print(f"Starting LBA : {current_sector + int(fields[4])}")
     print(f"Size in Sector : {fields[5]}")
 
 def partition_type(value):
