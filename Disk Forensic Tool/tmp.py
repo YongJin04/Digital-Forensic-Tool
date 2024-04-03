@@ -59,19 +59,18 @@ def NTFS_parser(file_path, sector_size, current_sector):
         NTFS_BPB_size = struct.calcsize(NTFS_BPB_format)
         NTFS_data = f.read(NTFS_BPB_size)
 
-        if NTFS_data == bytes([0] * NTFS_BPB_size): return  # Empty Partition Table Entry
-
         fields = struct.unpack(NTFS_BPB_size, NTFS_data)
-        print_NTFS_info(fields, current_sector, sector_size)
+        print_NTFS_info(fields, current_sector)
 
-def print_NTFS_info(fields, current_sector, sector_size):
+def print_NTFS_info(fields, current_sector):
     print(f"\n========== NTFS File System ==========")
-    print(f"Jump Boot Code : {True if fields[0] == 0x80 else False} ")
-    print(f"OEM ID : {''.join(f'{byte:02x}' for byte in fields[1])}")  # Print Hex Value & Continuous
-    print(f"Bytes Per Sector : {fields[2]:02x} ({partition_type(fields[2])})")
-    print(f"Start Cluster for $MFT : {''.join(f'{byte:02x}' for byte in fields[3])}")
-    print(f"Start Cluster for $MFTMirr : {current_sector * sector_size + int(fields[4])}")
-    print(f"MFT Start offset : {fields[5]}")
+    print(f"Jump Boot Code : {fields[0]}")
+    print(f"OEM ID : {fields[1]} / {fields[1])}")  # Print Hex Value & Continuous
+    print(f"Bytes Per Sector : {fields[2]}")
+    print(f"Sectors per Cluster : {fields[3]}")
+    print(f"Total Sector Count : {fields[5]}")
+    print(f"Starting Cluster / Sector for $MFT : {(current_sector / int(fields[3])) + int(fields[6])} / {current_sector + (int(fields[6]) * int(fields[3]))}")
+    print(f"Starting Cluster / Sector for $MFTMirr : {(current_sector / int(fields[3])) + int(fields[7])} / {current_sector + (int(fields[7]) * int(fields[3]))}")
 
 def FAT32_parser():
     print("ì½ë ì¶ê°")
@@ -82,8 +81,9 @@ if __name__ == "__main__":
 
     if '-f' in sys.argv:
         file_path_index = sys.argv.index('-f') + 1   # Find index of '-f'
-        if file_path_index < len(sys.argv):
-            partition_parser(sys.argv[file_path_index], boot_code_size, sector_size)
+        sector_size_index = sys.argv.index('-s')
+        if ((file_path_index < len(sys.argv) and (sector_size_index < len(sys.argv)):
+            partition_parser(sys.argv[file_path_index], boot_code_size, sys.argv[sector_size_index])
     else:
         print("Command : python 'MBR_parser.py' -f 'Image File Path'")
         sys.exit(1)
