@@ -61,7 +61,7 @@ def NTFS_parser(file_path, sector_size, current_sector):
 
         fields = struct.unpack(NTFS_BPB_format, NTFS_data)
 
-        print(f"\n========= NTFS File System =========")
+        print("\n========= NTFS File System =========")
         print(f"Jump Boot Code : {' '.join(f'{byte:02x}' for byte in fields[0])} (Hex)")
         print(f"OEM ID : {fields[1]} / {' '.join(f'{byte:02x}' for byte in fields[1])} (String / Hex)")  # Print Hex Value & Continuous
         print(f"Bytes Per Sector : {fields[2]}")
@@ -71,29 +71,53 @@ def NTFS_parser(file_path, sector_size, current_sector):
         print(f"Starting for $MFTMirr : {int(current_sector / int(fields[3])) + int(fields[7])} / {current_sector + (int(fields[7]) * int(fields[3]))} (Cluster / Sector)")
 
 def FAT32_parser(file_path, sector_size, current_sector):
-    with open(file_path, 'rb') as f2_1:
-        f2_1.seek(current_sector * sector_size, 0)  # Jump Boot Code Area
+    with open(file_path, 'rb') as f2:
+        f2.seek(current_sector * sector_size, 0)  # Jump Boot Code Area
 
         FAT32_BPB_format = '<3s8sHBH8sH6sI8sI'  # Format of NTFS BPB 
         FAT32_BPB_size = struct.calcsize(FAT32_BPB_format)
-        FAT32_data = f2_1.read(FAT32_BPB_size)
+        FAT32_data = f2.read(FAT32_BPB_size)
 
-        fields = struct.unpack(FAT32_BPB_format, NTFS_data)
+        fields = struct.unpack(FAT32_BPB_format, FAT32_data)
 
-        print(f"\n========= NTFS File System =========")
+        print("\n========= FAT32 File System =========")
+        print("# Reserved Area")
         print(f"Jump Boot Code : {' '.join(f'{byte:02x}' for byte in fields[0])} (Hex)")
         print(f"OEM ID : {fields[1]} / {' '.join(f'{byte:02x}' for byte in fields[1])} (String / Hex)")  # Print Hex Value & Continuous
         print(f"Bytes Per Sector : {fields[2]}")
         print(f"Sectors per Cluster : {fields[3]}")
+        print(f"Reserved Sector Count : ")
+        print(f"Sectors per Track")
         print(f"Total Sector Count : {fields[5]}")
-        print(f"Starting for $MFT : {int(current_sector / int(fields[3])) + int(fields[6])} / {current_sector + (int(fields[6]) * int(fields[3]))} (Cluster / Sector)")
-        print(f"Starting for $MFTMirr : {int(current_sector / int(fields[3])) + int(fields[7])} / {current_sector + (int(fields[7]) * int(fields[3]))} (Cluster / Sector)")
+        print(f"Root Directory Offset : (Cluster)")
         
-    with open(file_path, 'rb') as f2_2:
-    
-    with open(file_path, 'rb') as f2_3:
+        
+        
+        f2.seek((current_sector + 1) * sector_size, 0)
+        
+        FAT32_FSINFO_format = '<4s480s4sII'  # Format of NTFS BPB 
+        FAT32_FSINFO_size = struct.calcsize(FAT32_FSINFO_format)
+        FAT32_data = f2.read(FAT32_FSINFO_size)
 
+        fields = struct.unpack(FAT32_FSINFO_format, FAT32_data)
 
+        print("\n# Reserved Area")
+        print(f"Signature : {fields[0]} (String)")
+        print(f"Signature : {fields[2]} (String)")
+        print(f"Num of Free Cluster : {fields[3]}")
+        print(f"Next Free Cluster : {fields[4]}")
+        
+        
+        
+        FAT32_FAT_format = '<'  # Format of NTFS BPB 
+        FAT32_FAT_size = struct.calcsize(FAT32_FAT_format)
+        FAT32_data = f2.read(FAT32_FAT_size)
+
+        fields = struct.unpack(FAT32_FAT_format, FAT32_data)
+        
+        print("\n# FAT Area")
+        
+        
 if __name__ == "__main__":
     sector_size = 512  # Define Sector Size (512 Byte)
     boot_code_size = 446  # Define Boot Code Size (446 Byte)
