@@ -3,7 +3,7 @@ import sys
 
 def MBR_partition_parser(file_path, boot_code_size, sector_size):
     with open(file_path, 'rb') as f:
-        f.seek(boot_code_size, 0)  # Jump Boot Code Area
+        f.seek(boot_code_size, 0)  # Jump Partition Table Area
 
         partition_table_format = '<B3sB3sII'  # Format of Partition Table Entry
         partition_table_size = struct.calcsize(partition_table_format)
@@ -53,7 +53,8 @@ def partition_type(value):
 
 def NTFS_parser(file_path, sector_size, current_sector):
     with open(file_path, 'rb') as f1:
-        f1.seek(current_sector * sector_size, 0)  # Jump Boot Code Area
+        # Print NTFS BPB 
+        f1.seek(current_sector * sector_size, 0)  # Jump NTFS Area
 
         NTFS_BPB_format = '<3s8sHB26sQQQ'  # Format of NTFS BPB 
         NTFS_BPB_size = struct.calcsize(NTFS_BPB_format)
@@ -72,9 +73,10 @@ def NTFS_parser(file_path, sector_size, current_sector):
 
 def FAT32_parser(file_path, sector_size, current_sector):
     with open(file_path, 'rb') as f2:
-        f2.seek(current_sector * sector_size, 0)  # Jump Boot Code Area
+        # Print FAT32 BPB 
+        f2.seek(current_sector * sector_size, 0)  # Jump FTA32 Area
 
-        FAT32_BPB_format = '<3s8sHBH8sH6sI8sI'  # Format of NTFS BPB 
+        FAT32_BPB_format = '<3s8sHBH8sH6sI8sI'  # Format of FAT32 BPB 
         FAT32_BPB_size = struct.calcsize(FAT32_BPB_format)
         FAT32_data = f2.read(FAT32_BPB_size)
 
@@ -91,11 +93,10 @@ def FAT32_parser(file_path, sector_size, current_sector):
         print(f"Total Sector Count : {fields[5]}")
         print(f"Root Directory Offset : (Cluster)")
         
+        # Print FAT32 FSINFO 
+        f2.seek((current_sector + 1) * sector_size, 0)  # Jump FTA32 FSINFO Area
         
-        
-        f2.seek((current_sector + 1) * sector_size, 0)
-        
-        FAT32_FSINFO_format = '<4s480s4sII'  # Format of NTFS BPB 
+        FAT32_FSINFO_format = '<4s480s4sII'  # Format of FAT32 FSINFO 
         FAT32_FSINFO_size = struct.calcsize(FAT32_FSINFO_format)
         FAT32_data = f2.read(FAT32_FSINFO_size)
 
@@ -106,10 +107,11 @@ def FAT32_parser(file_path, sector_size, current_sector):
         print(f"Signature : {fields[2]} (String)")
         print(f"Num of Free Cluster : {fields[3]}")
         print(f"Next Free Cluster : {fields[4]}")
-        
-        
-        
-        FAT32_FAT_format = '<'  # Format of NTFS BPB 
+
+        # Print FAT32 FAT Area 
+        f2.seek((current_sector + 1) * sector_size, 0)  # Jump FTA32 FAT Aera
+
+        FAT32_FAT_format = '<'  # Format of FAT32 FAT Area 
         FAT32_FAT_size = struct.calcsize(FAT32_FAT_format)
         FAT32_data = f2.read(FAT32_FAT_size)
 
