@@ -1,4 +1,5 @@
 import struct
+import math
 import sys
 import os
 
@@ -45,12 +46,24 @@ def NTFS_parser(filePath, numberOfPartition, currentSector, sectorSize):
 def MTF_parser(filePath, numberOfPartition, sectorOfMFT, currentSector, sectorSize, SPC):
     with open(filePath, 'rb') as f2:
         f2.seek(sectorOfMFT * sectorSize, 0)  # Move MFT Area
-
+        
+        # MFT Entry Header
+        # File Signature, Number of Entry in Fixup Array, Offset of First Attribute, Flag, Size of Used MFT Entry
         MFTHeaderFormat = '<4sHHQ / HHHHII / QHHI'  # Format of MFT Entry Header '<4sHHQ / HHHHII / QHHI'
         MFTHeaderfieldSize, MFTHeaderfieldData, MFTHeaderfields = read_struct(f2, MFTHeaderFormat)
-
-
-
+        
+        f2.seek(int(MFTHeaderfields[6]) - MFTHeaderfieldSize, 1)  # Attribute 영역으로 이동
+        
+        
+        # Attribute
+        commonAttributeFormat = '<IIBBHHH'  # Format of Common Attribute Header
+        commonAttributeSize, commonAttributeData, commonAttributeFields = read_struct(f2, commonAttributeFormat)
+    
+        if (commonAttributeFields[2] == 0):  # Resident Attribute Header
+            residentAttributeFormat = '<IHBB'  # Format of Resident Attribute Header
+            residentAttributeSize, residentAttributeData, residentAttributeFields = read_struct(f2, residentAttributeFormat)
+        else:  # Non-Resident Attribute Header
+            
 
 
 
@@ -156,8 +169,8 @@ def read_runlist(byte):
     runLengthLength = byte & 0x0F  # Extract Lower 4 bits
     return runOffsetLength, runLengthLength
 
-def round_up_to_eight(x):
-    return (int(x / 8) + 1) * 8
+def round_up(x):
+    return math.ceil(n / 8) * 8
 
 def extract_file_data(file_path, partition_sector, data_length, data_offset, sector_size, SPC):
     with open(file_path, 'rb') as f3:
