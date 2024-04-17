@@ -96,7 +96,7 @@ def MTF_parser(filePath, dirPath, sectorOfMFT, currentSector, sectorSize, SPC):
 
                     match commonAttributeFields[0]:
                         case 0x30:  # Attribute Content Type : $FILE_NAME (0x30)
-                            if (commonAttributeFields[2] == 0x00):  # Non Resident Attribute Header
+                            if (commonAttributeFields[2] == 0x00):  # Resident Attribute Header
                                 residentAttributeFormat = '<IHBB8s'  # Format of Resident Attribute '<QQ / QQ / QQ / QII / B'
                                 _, _, residentAttributeFields = read_struct(f2, residentAttributeFormat)
                                 f2.seek(-(0x20 - residentAttributeFields[1]), 1)  # Resident Attribute Header의 크기가 0x08이면 다시 0x08 뒤로 이동, 0x10이면 이동하지 않음 -> 그래야 Attribute 영역임
@@ -117,7 +117,7 @@ def MTF_parser(filePath, dirPath, sectorOfMFT, currentSector, sectorSize, SPC):
 
 
                         case 0x80:  # Attribute Content Type : $DATA (0x80)
-                            if (MFTHeaderFields[2] == 0x00):  # Non Resident Attribute Header
+                            if (commonAttributeFields[2] == 0x00):  # Resident Attribute Header
                                 residentAttributeFormat = '<IHBB8s'  # Format of Resident Attribute '<QQ / QQ / QQ / QII / B'
                                 _, _, residentAttributeFields = read_struct(f2, residentAttributeFormat)
                                 f2.seek(-(0x20 - residentAttributeFields[1]), 1)  # Resident Attribute Header의 크기가 0x08이면 다시 0x08 뒤로 이동, 0x10이면 이동하지 않음 -> 그래야 Attribute 영역임
@@ -130,7 +130,7 @@ def MTF_parser(filePath, dirPath, sectorOfMFT, currentSector, sectorSize, SPC):
 
                                 file_recovery(dirPath, fileName, fileData)  # Recover Deleted File
 
-                            elif (MFTHeaderFields[2] == 0x01):  # Resident Attribute Header
+                            elif (commonAttributeFields[2] == 0x01):  # Non Resident Attribute Header
                                 nonResidentAttributeFormat = '<QQ / HH4sQ / QQ / Q'  # Format of Non Resident Attribute'<QQ / HH4sQ / QQ / Q'
                                 _, _, nonResidentAttributeFields = read_struct(f2, nonResidentAttributeFormat)
                                 f2.seek(-(0x48 - nonResidentAttributeFields[2]), 1)  # Resident Attribute Header의 크기가 0x08이면 다시 0x08 뒤로 이동, 0x10이면 이동하지 않음 -> 그래야 Attribute 영역임
