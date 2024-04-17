@@ -3,7 +3,10 @@ import math
 import sys
 import os
 
-def partition_parser(filePath, bootCodeSize, sectorSize):
+# int(fields[])  # Default Type : int
+# $MFT 파일 읽는 알고리즘 추가하기
+
+def partition_parser(filePath, dirPath, bootCodeSize, sectorSize):
     with open(filePath, 'rb') as f:
         f.seek(bootCodeSize, 0)  # Move Partition Table Area
 
@@ -12,10 +15,10 @@ def partition_parser(filePath, bootCodeSize, sectorSize):
 
         partitionTableEntryFormat = '<B3sB3sII'  # Format of Partition Table Entry
 
-        while(True):
+        while True:
             fieldSize, fieldData, fields = read_struct(f, partitionTableEntryFormat)
 
-            if (fieldData == bytes([0] * fieldSize)): break  # Empty Partition Table Entry
+            if fieldData == bytes([0] * fieldSize): break  # Empty Partition Table Entry
             else:
                 numberOfPartition += 1
 
@@ -24,13 +27,18 @@ def partition_parser(filePath, bootCodeSize, sectorSize):
                         # print(f"\nPartition {numberOfPartition} : Extended System")
                         currentSector += int(fields[4])  # Update Next Partition Sector
                         f.seek(currentSector * sectorSize + bootCodeSize, 0)  # Move Next Partition Table Entry
+                        pass
                     case 0x07:  # Partition Type : NTFS File System
                         print(f"\nPartition {numberOfPartition} : NTFS File System")
-                        NTFS_parser(filePath, numberOfPartition, currentSector + int(fields[4]), sectorSize)
+                        NTFS_BPB_parser(filePath, dirPath, currentSector + int(fields[4]), sectorSize)
+                        pass
                     case 0x0B | 0x0C:  # Partition Type : FAT32 File System
                         # print(f"\nPartition {numberOfPartition} : FAT32 File System")
+                        pass  # 추가적인 로직이 필요하면 여기에 추가하세요.
 
-def NTFS_parser(filePath, numberOfPartition, currentSector, sectorSize):
+
+
+def NTFS_BPB_parser(filePath, dirPath, currentSector, sectorSize):
     with open(filePath, 'rb') as f1:
         f1.seek(currentSector * sectorSize, 0)  # Move NTFS VBR Area
 
@@ -41,152 +49,174 @@ def NTFS_parser(filePath, numberOfPartition, currentSector, sectorSize):
         clusterOfMFT = int(fields[10])  # Start Cluster of MFT Area
         sectorOfMFT = currentSector + (clusterOfMFT * SPC)  # Start Sector of MFT Area
 
-        MTF_parser(filePath, numberOfPartition, sectorOfMFT, currentSector, sectorSize, SPC)
+        MTF_parser(filePath, dirPath, sectorOfMFT, currentSector, sectorSize, SPC)
 
-def MTF_parser(filePath, numberOfPartition, sectorOfMFT, currentSector, sectorSize, SPC):
+
+
+def MTF_parser(filePath, dirPath, sectorOfMFT, currentSector, sectorSize, SPC):
     with open(filePath, 'rb') as f2:
         f2.seek(sectorOfMFT * sectorSize, 0)  # Move MFT Area
         
-        # MFT Entry Header
-        # File Signature, Number of Entry in Fixup Array, Offset of First Attribute, Flag, Size of Used MFT Entry
-        MFTHeaderFormat = '<4sHHQ / HHHHII / QHHI'  # Format of MFT Entry Header '<4sHHQ / HHHHII / QHHI'
-        MFTHeaderfieldSize, MFTHeaderfieldData, MFTHeaderfields = read_struct(f2, MFTHeaderFormat)
-        
-        f2.seek(int(MFTHeaderfields[6]) - MFTHeaderfieldSize, 1)  # Attribute 영역으로 이동
-        
-        
-        # Attribute
-        commonAttributeFormat = '<IIBBHHH'  # Format of Common Attribute Header
-        commonAttributeSize, commonAttributeData, commonAttributeFields = read_struct(f2, commonAttributeFormat)
-    
-        if (commonAttributeFields[2] == 0):  # Resident Attribute Header
-            residentAttributeFormat = '<IHBB'  # Format of Resident Attribute Header
-            residentAttributeSize, residentAttributeData, residentAttributeFields = read_struct(f2, residentAttributeFormat)
-        else:  # Non-Resident Attribute Header
-            
-
-
-
-
-
-
         f2.seek(320, 1)  # Read $MFT Entry's Data Length
+        runLengthLength, runOffsetLength = read_runlist(int.from_bytes(f2.read(1), byteorder='little'))
+        dataLength = int.from_bytes(f2.read(runLengthLength), byteorder='little')
+        
+        print(f"{dataLength}")
+        
+        f2.seek(1024 - (320 + runLengthLength + 1), 1)
 
-        run_length, run_offset = split_byte(int.from_bytes(f2.read(1), byteorder='little'))
-        data_length = int.from_bytes(f2.read(run_length), byteorder='little')
-        # print(f"{data_length}")
-        f2.seek(1024 - (320 + run_length + 1), 1)
+        for i in range(2, dataLength * 4):  # Read MFT Entry by First MFT Entry($MFT)'s Data Length
 
-        for i in range(2, data_length * 4):  # Read MFT Entry by First MFT Entry($MFT)'s Data Length
-            MFT_entry_header_format = '<4s18sB33s'  # Format of MFT Entry Header 
-            MFT_entry_header_size = struct.calcsize(MFT_entry_header_format)
-            MFT_entry_header_data = f2.read(MFT_entry_header_size)
+            # MFT Entry Header
+            # File Signature, Number of Entry in Fixup Array, Offset of First Attribute, Flag, Size of Used MFT Entry
+            MFTHeaderFormat = '<4sHHQHHHHIIQHHI'  # Format of MFT Entry Header '<4sHHQ / HHHHII / QHHI'
+            MFTHeaderSize, _, MFTHeaderFields = read_struct(f2, MFTHeaderFormat)
 
-            fields = struct.unpack(MFT_entry_header_format, MFT_entry_header_data)
 
-            # print(f"{fields[0]} {fields[2]}")  # MFT Entry First 4 Byte, MFT Entry Flag
+            if ((MFTHeaderFields[0] == b"FILE") and (MFTHeaderFields[7] == 0x00)):  # MFT Entry Signature : FILE / MFT Entry Flag : Deleted File
+                print(f"\nDeletion MFT Entry Number : {MFTHeaderFields[13]}")
 
-            file_name = ''
-            file_data = bytes()  # Recovery File Data
-            if (fields[0] == b"FILE" and fields[2] == 0):  # MFT Entry Assignment (FILE), MFT Entry Flag == 0 (Deletion Event)
-                print(f"\nDeletion MFT Entry Number : {i}")
+                fileName = ''
+                fileData = bytes()
+                sizeOfRemainMFTEntry = MFTHeaderSize
 
-                current_MFT_entry_size = MFT_entry_header_size  # 56
+                f2.seek(int(MFTHeaderFields[6]) - MFTHeaderSize, 1)  # Move Attribute Area (Move Size = Offset of Attribute Area - Common Attribute Header Size)
 
+                # Attribute Area
                 while(True):
-                    MFT_attr_header_format = '<II'  # Attribute Type, Attribute Size
-                    MFT_attr_header_size = struct.calcsize(MFT_attr_header_format)
-                    MFT_attr_header_data = f2.read(MFT_attr_header_size)
+                    # Common Attribute Header
+                    commonAttributeFormat = '<IIBBHHH'  # Format of Common Attribute Header
+                    commonAttributeSize, _, commonAttributeFields = read_struct(f2, commonAttributeFormat)
+                    sizeOfRemainMFTEntry += commonAttributeFields[1]
 
-                    fields = struct.unpack(MFT_attr_header_format, MFT_attr_header_data)
 
-                    if (file_data != bytes()):  # End Point of MFT Entry
-                        next_MFT_entry_size = 1024 - (current_MFT_entry_size + 8)
 
-                        f2.seek(next_MFT_entry_size, 1) # Move Next MFT Entry
-                        
-                        file_recovery(file_name, dir_path, file_data)  # Recovery Deleted File
 
-                        break
 
-                    current_MFT_entry_size += int(fields[1])
-                    if (fields[0] == 0x30):  # File Name Attribute
-                        MFT_attr_header_format = '<80sH'  # Format of File Name Attribute
-                        MFT_attr_header_size = struct.calcsize(MFT_attr_header_format)
-                        MFT_attr_header_data = f2.read(MFT_attr_header_size)
 
-                        fields = struct.unpack(MFT_attr_header_format, MFT_attr_header_data)
+                    match commonAttributeFields[0]:
+                        case 0x30:  # Attribute Content Type : $FILE_NAME (0x30)
+                            if (commonAttributeFields[2] == 0x00):  # Non Resident Attribute Header
+                                residentAttributeFormat = '<IHBB8s'  # Format of Resident Attribute '<QQ / QQ / QQ / QII / B'
+                                _, _, residentAttributeFields = read_struct(f2, residentAttributeFormat)
+                                f2.seek(-(0x20 - residentAttributeFields[1]), 1)  # Resident Attribute Header의 크기가 0x08이면 다시 0x08 뒤로 이동, 0x10이면 이동하지 않음 -> 그래야 Attribute 영역임
 
-                        file_name = (f2.read(int(fields[1]) * 2)).decode('utf-16le')  # Extract File Name (Decode UTF-16le)
-                        # print(f"File Name : {file_name}")
-
-                        next_attr_size = round_up_to_eight((int(fields[1]) + 1) * 2) - (int(fields[1]) + 1) * 2  # Move Next Attribute
-
-                        f2.seek(next_attr_size, 1)
-
-                    elif (fields[0] == 0x80):  # File Data Attribute
-                        f2.seek(56, 1)  # Move Data Attribute Header (개선 방안 고려하기)
-
-                        while(True):
-                            MFT_attr_header_format = '<B'  # Read RunList's First Byte
-                            MFT_attr_header_size = struct.calcsize(MFT_attr_header_format)
-                            MFT_attr_header_data = f2.read(MFT_attr_header_size)
-
-                            fields = struct.unpack(MFT_attr_header_format, MFT_attr_header_data)
-
-                            if fields[0] == 0x00 or fields[0] == 0xFF:  # End Point of RunList (Non Exist RunList)
-                                next_attr_size = round_up_to_eight(runlist_size) - (runlist_size) - 1
-
-                                # print(next_attr_size)
-
-                                f2.seek(next_attr_size, 1)  # Move Next Attribute
-
-                                break
+                                filenameAttributeFormat = '<QQQQQQQIIB'  # Format of $FILE_NAME Attribute '<QQ / QQ / QQ / QII / B'
+                                _, _, filenameAttributeFields = read_struct(f2, filenameAttributeFormat)
+                                fileName = (f2.read(int(filenameAttributeFields[9]) * 2)).decode('utf-16le')
+                                
+                                fileNameRemain = round_up((int(filenameAttributeFields[9]) * 2) + 1) - ((int(filenameAttributeFields[9]) * 2) + 1)  # 남은 파일 이름 영역 계산
+                                f2.seek((fileNameRemain), 1)  # 남은 파일 이름 영역 이동 / Move Next Attribute Content
                             else:
-                                run_length, run_offset = split_byte(int(fields[0]))  # Decode RunList
+                                print(f"Number of MFT : {MFTHeaderFields[13]} \n Error : Common Attrinute Header Flag is '0x01' Value.")
+                                quit(1)
+                            pass
 
-                                # print(f"{run_length} {run_offset}")
-                                runlist_size = run_length + run_offset + 1
 
-                                data_length = int.from_bytes(f2.read(run_length), byteorder='little')  # RunList Data Length (Cluster)
-                                data_offset = int.from_bytes(f2.read(run_offset), byteorder='little')  # RunList Data Offset (Cluster)
 
-                                # print(f"{data_length} {data_offset}")
 
-                                file_data += extract_file_data(file_path, partition_sector, data_length, data_offset, sector_size, SPC)  # Extract Deleted File Data
-                    else:
-                        f2.seek(int(fields[1]) - 8, 1)  # Move Next Attribute
+
+                        case 0x80:  # Attribute Content Type : $DATA (0x80)
+                            if (MFTHeaderFields[2] == 0x00):  # Non Resident Attribute Header
+                                residentAttributeFormat = '<IHBB8s'  # Format of Resident Attribute '<QQ / QQ / QQ / QII / B'
+                                _, _, residentAttributeFields = read_struct(f2, residentAttributeFormat)
+                                f2.seek(-(0x20 - residentAttributeFields[1]), 1)  # Resident Attribute Header의 크기가 0x08이면 다시 0x08 뒤로 이동, 0x10이면 이동하지 않음 -> 그래야 Attribute 영역임
+
+                                fileData = f2.read(int(residentAttributeFields[0]))
+
+                                file_recovery(dirPath, fileName, fileData)  # Recover Deleted File
+
+                                f2.seek((round_up(residentAttributeFields[0]) - residentAttributeFields[0]), 1)  # Move Next Attribute
+
+                                file_recovery(dirPath, fileName, fileData)  # Recover Deleted File
+
+                            elif (MFTHeaderFields[2] == 0x01):  # Resident Attribute Header
+                                nonResidentAttributeFormat = '<QQ / HH4sQ / QQ / Q'  # Format of Non Resident Attribute'<QQ / HH4sQ / QQ / Q'
+                                _, _, nonResidentAttributeFields = read_struct(f2, nonResidentAttributeFormat)
+                                f2.seek(-(0x48 - nonResidentAttributeFields[2]), 1)  # Resident Attribute Header의 크기가 0x08이면 다시 0x08 뒤로 이동, 0x10이면 이동하지 않음 -> 그래야 Attribute 영역임
+
+                                contentSize = 0
+                                while(True):
+                                    _, _, runListFields = read_struct(f2, '<B')
+                                    runLengthLength, runOffsetLength = read_runlist(runListFields[0])
+
+                                    contentSize += runLengthLength + runOffsetLength + 1
+
+                                    if ((runListFields[0] == 0xFF) or (runLengthLength == 0x00)):  # 운이 좋게 딱끝난 경우 / 공간이 남게 끝난 경우, 이후의 Attribute가 존재할 수 있으므로, 하위 4bit 즉 RunLength가 0x00이면 다음으로 넘어감
+                                        f2.seek(round_up(contentSize) - (contentSize) - 1, 1)  # Move Next Attribute ('<B'로 1바이트 읽은 거 때문에 1 더 뺌)
+                                        
+                                        file_recovery(dirPath, fileName, fileData)  # Recover Deleted File
+                                        break
+
+                                    else:
+                                        dataLength = int.from_bytes(f2.read(runLengthLength), byteorder ='little')
+                                        dataOffset = int.from_bytes(f2.read(runOffsetLength), byteorder ='little')
+
+                                        fileData += extract_file_data(filePath, currentSector, dataLength, dataOffset, sectorSize, SPC)  # Extract Deleted File Data
+                            pass
+                            
+                        case 0xFFFFFFFF:  # End Point of All Attribute Content
+                            f2.seek(MFTHeaderFields[9] - (sizeOfRemainMFTEntry - commonAttributeSize), 1)  # Move Next MFT Entry (Move Size = MFT Entry Size - (Used MFT Entry Size - Common Attrinbute Header Size))
+                            break
+                            pass
+
+
+
+
+
+
+
+
+
+
+
+                        case _:  # Not Importnat Attribute Content Type
+                            f2.seek(commonAttributeFields[1] - commonAttributeSize, 1)  # Move Next Attribute Content (Move Size = Current Attribute Content Size - Common Attribute Header Size)
+                            pass
             else:
-                f2.seek(1024 - MFT_entry_header_size, 1)  # Move Next MFT Entry
+                f2.seek(MFTHeaderFields[9] - MFTHeaderSize, 1)  # Move Next MFT Entry (Move Size = MFT Entry Size - MFT Entry Header Size)
+
+
 
 def read_struct(f, fieldFormat):
     fieldSize = struct.calcsize(fieldFormat)  # Calculate Format Size
     fieldData = f.read(fieldSize)  # Read Field Data
     return fieldSize, fieldData, struct.unpack(fieldFormat, fieldData)
 
+
+
 def read_runlist(byte):
     runOffsetLength = (byte >> 4) & 0x0F  # Extract Top 4 bits
     runLengthLength = byte & 0x0F  # Extract Lower 4 bits
-    return runOffsetLength, runLengthLength
+    return runLengthLength, runOffsetLength
+
+
 
 def round_up(x):
-    return math.ceil(n / 8) * 8
+    return math.ceil(x / 8) * 8
 
-def extract_file_data(file_path, partition_sector, data_length, data_offset, sector_size, SPC):
-    with open(file_path, 'rb') as f3:
-        f3.seek((partition_sector + data_offset * SPC) * sector_size, 0)  # Jump File Data Cluster
 
-        # print(f"Start Offset : {partition_sector + data_offset * SPC}")
-        # print(f"Data Length : {data_length * SPC}")
 
-        return bytes(f3.read((data_length * SPC) * sector_size))  # Read File Data Cluster
+def extract_file_data(filePath, partitionSector, dataLength, dataOffset, sectorSize, SPC):
+    with open(filePath, 'rb') as f3:
+        f3.seek((partitionSector + dataOffset * SPC) * sectorSize, 0)  # Move File Data Sector
 
-def file_recovery(file_name, dir_path, file_data):
-    output_file_path = os.path.join(dir_path, file_name)
+        print(f"Data Start Offset : {partitionSector + dataOffset * SPC}")
+        print(f"Data Length : {dataLength * SPC}")
 
-    with open(output_file_path, 'wb') as file:  # Create Deleted File
-        file.write(file_data)
-    print(f"Recovery '{file_name}' File")
+        return bytes(f3.read((dataLength * SPC) * sectorSize))  # Read File Data Cluster
+
+
+
+def file_recovery(dirPath, fileName, fileData):
+    outputFilePath = os.path.join(dirPath, fileName)
+
+    with open(outputFilePath, 'wb') as file:
+        file.write(fileData)
+
+    print(f"Recovery '{fileName}' File")
+
+
 
 if __name__ == "__main__":
     sector_size = 512  # Define Sector Size (512 Byte)
@@ -196,7 +226,7 @@ if __name__ == "__main__":
         input_file_path_index = sys.argv.index('-f') + 1   # Find index of '-f'
         output_dir_path_index = sys.argv.index('-o') + 1   # Find index of '-o'
         if (input_file_path_index < len(sys.argv)) and (output_dir_path_index < len(sys.argv)):
-            partition_parser(sys.argv[input_file_path_index], boot_code_size, sector_size)
+            partition_parser(sys.argv[input_file_path_index], sys.argv[output_dir_path_index], boot_code_size, sector_size)
     else:
         print("Command : python 'NTFS_file_recovery.py' -f 'Image File Path' -o 'Recovery File Directory path'")
         sys.exit(1)
