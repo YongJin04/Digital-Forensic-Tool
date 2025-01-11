@@ -115,10 +115,11 @@ def read_parent_child_table(image_file, base_cluster, cluster_size, container_ta
 
     # Declar Parent Child Table Global Dictionary
     global parent_child_table_dic; parent_child_table_dic = {}
+    global hierarchy_data_storage; hierarchy_data_storage = []
     
     read_index(image_file, base_cluster, cluster_size, "Parent Child Table", container_table_key_dic, object_id_table_lcn_dic)
 
-def read_directory_table(image_file, base_cluster, cluster_size, container_table_key_dic, object_id_table_lcn_dic, directory_object_id):
+def read_directory_table(image_file, base_cluster, cluster_size, container_table_key_dic, object_id_table_lcn_dic, directory_object_id, prefix, connector):
     image_file.seek(base_cluster * cluster_size)
 
     page_header = read_struct(image_file, PAGE_HEADER_STRUCTURE)
@@ -129,9 +130,9 @@ def read_directory_table(image_file, base_cluster, cluster_size, container_table
         else:
             sys.exit(f"This block is not Table.\n")
     
-    read_index(image_file, base_cluster, cluster_size, "Directory Table", container_table_key_dic, object_id_table_lcn_dic)
+    return read_index(image_file, base_cluster, cluster_size, "Directory Table", container_table_key_dic, object_id_table_lcn_dic, prefix, connector)
 
-def read_index(image_file, base_cluster, cluster_size, table_type, container_table_key_dic, object_id_table_lcn_dic):
+def read_index(image_file, base_cluster, cluster_size, table_type, container_table_key_dic, object_id_table_lcn_dic, prefix = None, connector = None):
     image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE))  # Move to Index Root
 
     index_root = read_struct(image_file, INDEX_ROOT_STRUCTURE)
@@ -199,15 +200,19 @@ def read_index(image_file, base_cluster, cluster_size, table_type, container_tab
                 "child_directory_vcn": int(child_directory_vcn)
             }
 
+            # Store File System Directory Tree
+            build_and_store_directory_hierarchy_tree()
+
             # Print File System Directory Tree
-            create_parent_child_relationship(parent_child_table_dic[key])
-            time.sleep(0.05)  # See Building File Systsem Directory Tree
+            create_parent_child_relationship()
+
+            # See Building File Systsem Directory Tree
+            time.sleep(0.3)
 
         elif (table_type == "Directory Table"):  # Table Type is Directory Table
             image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE) + index_root[0] + index_key + index_entry[1])  # Move to Index Entry Value (+ Index Header, Index Entry)
             index_entry_key = read_struct(image_file, INDEX_KEY_STRUCTURE)
 
-            print(hex(index_entry_key[0]))
             if (index_entry_key[0] == 0x80000020):  # This Index Entry is 'File Table'
                 image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE) + index_root[0] + index_key + index_entry[1])  # Move to Index Entry Key (+ Index Header, Index Entry)
                 index_entry_key = read_struct(image_file, FILE_TABLE_METADATA_STRUCTURE)
@@ -215,7 +220,7 @@ def read_index(image_file, base_cluster, cluster_size, table_type, container_tab
                 image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE) + index_root[0] + index_key + index_entry[4])  # Move to Index Entry Value (+ Index Header, Index Entry)
                 index_entry_value = read_struct(image_file, FILE_TABLE_NAME_STRUCTURE)
                 
-                print(f"File {hex(index_entry_key[1])}, {hex(index_entry_value[1])}, {index_entry_value[2]}")
+                # print(f"{prefix}{connector} File {hex(index_entry_key[1])}, {hex(index_entry_value[1])}, {index_entry_value[2]}")
 
             elif (index_entry_key[0] == 0x20030):  # This Index Entry is 'Directory Table'
                 image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE) + index_root[0] + index_key + index_entry[1])  # Move to Index Entry Key (+ Index Header, Index Entry)
@@ -224,9 +229,39 @@ def read_index(image_file, base_cluster, cluster_size, table_type, container_tab
                 image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE) + index_root[0] + index_key + index_entry[4])  # Move to Index Entry Value (+ Index Header, Index Entry)
                 index_entry_value = read_struct(image_file, DIRECTORY_TABLE_METADATA_STRUCTURE)
                 
-                print(f"Dir {hex(index_entry_value[1])}, {index_entry_key[1]}")
+                # print(f"{prefix}{connector} Dir {hex(index_entry_value[1])}, {index_entry_key[1]}")
 
-def create_parent_child_relationship(_):
+def build_and_store_directory_hierarchy_tree():
+    parent_ids = set(v['parent_directory_object_id'] for v in parent_child_table_dic.values())
+    child_ids = set(v['child_directory_object_id'] for v in parent_child_table_dic.values())
+
+    root_ids = parent_ids - child_ids
+
+    def build_subtree(parent_id):
+        subtree = {}
+        for entry in parent_child_table_dic.values():
+            if entry["parent_directory_object_id"] == parent_id:
+                subtree['vcn'] = entry["parent_directory_vcn"]
+                break
+        subtree['children'] = {}
+
+        for entry in parent_child_table_dic.values():
+            if entry["parent_directory_object_id"] == parent_id:
+                c_id = entry["child_directory_object_id"]
+                c_vcn = entry["child_directory_vcn"]
+                subtree['children'][c_id] = {
+                    'vcn': c_vcn,
+                    'children': build_subtree(c_id)['children']
+                }
+        return subtree
+
+    result_tree = {}
+    for r_id in root_ids:
+        result_tree[r_id] = build_subtree(r_id)
+
+    hierarchy_data_storage.append(result_tree)
+
+def create_parent_child_relationship():
     os.system('cls' if os.name == 'nt' else 'clear')  # Windows OS
 
     # Save all of 'Directory Object ID' to 'Set'
@@ -241,10 +276,10 @@ def create_parent_child_relationship(_):
 
         for num, child_directory_object_id in enumerate(child_directory_object_id_list):  # Print All of Node Under Current Node
             connector = '└─' if num == len(child_directory_object_id_list) - 1 else '├─'  # IF Current Node is Last Node -> '└─' else '├─'
-            print(f"{prefix}{connector} {hex(child_directory_object_id['child_directory_object_id'])}, {hex(child_directory_object_id['child_directory_vcn'])}")  # Print Current Node Information
             
-            # CALL CALL CALL CALL CALL CALL CALL CALL CALL CALL
-            read_directory_table(image_file, child_directory_object_id['child_directory_vcn'], cluster_size, container_table_key_dic, object_id_table_lcn_dic, child_directory_object_id['child_directory_object_id'])
+            # Print Current Node Information
+            print(f"{prefix}{connector}", end=" ")
+            print(f"{hex(child_directory_object_id['child_directory_object_id'])}, {hex(child_directory_object_id['child_directory_vcn'])}")
 
             new_prefix = prefix + ('    ' if num == len(child_directory_object_id_list)-1 else '│   ')  # Create New Node -> IF Current Node is Last Node -> 'NULL' else '│'
             print_tree(child_directory_object_id['child_directory_object_id'], new_prefix)
@@ -256,11 +291,10 @@ def create_parent_child_relationship(_):
             if entry["parent_directory_object_id"] == root_directory_object_id:
                 root_directory_object_id_vcn = entry["parent_directory_vcn"]
                 break
-
-        print(f"{hex(root_directory_object_id)}, {hex(root_directory_object_id_vcn)}")  # Print Root Node Information
-
-        # CALL CALL CALL CALL CALL CALL CALL CALL CALL CALL
-        read_directory_table(image_file, root_directory_object_id_vcn, cluster_size, container_table_key_dic, object_id_table_lcn_dic, root_directory_object_id)
+        
+        # Print Root Node Information
+        print(f"", end=" ")
+        print(f"{hex(root_directory_object_id)}, {hex(root_directory_object_id_vcn)}")
 
         print_tree(root_directory_object_id)  # Print All Node Calling Recursive Function
         print()
@@ -327,4 +361,3 @@ if __name__ == "__main__":
         # Parent Child Table -> Itinerate Parent Child Table -> Create Directory Tree with Directory and File Metadata.
         parent_child_table_vcn = lcn_to_vcn(cluster_size, container_size, parent_child_table_lcn, container_table_key_dic)
         read_parent_child_table(image_file, parent_child_table_vcn, cluster_size, container_table_key_dic, object_id_table_lcn_dic)
-
