@@ -114,12 +114,38 @@ def read_parent_child_table(image_file, base_cluster, cluster_size, container_ta
         sys.exit(f"This block is not Parent Child Table.\n")
 
     # Declar Parent Child Table Global Dictionary
-    global parent_child_table_dic; parent_child_table_dic = {}
-    global hierarchy_data_storage; hierarchy_data_storage = []
+    global master_directory_tree_dic; master_directory_tree_dic = {}
     
     read_index(image_file, base_cluster, cluster_size, "Parent Child Table", container_table_key_dic, object_id_table_lcn_dic)
 
-def read_directory_table(image_file, base_cluster, cluster_size, container_table_key_dic, object_id_table_lcn_dic, directory_object_id, prefix, connector):
+def traversing_directory_hierarchy(image_file, base_cluster, cluster_size, container_table_key_dic, object_id_table_lcn_dic):
+    visit_object_id = 0x600
+    current_directory_tree_dic = {}
+    
+    while True:
+        # os.system('cls' if os.name == 'nt' else 'clear')
+
+        current_directory_tree_dic = build_current_tree(master_directory_tree_dic, current_directory_tree_dic, visit_object_id)
+        
+        visit_object_id_lcn = object_id_table_lcn_dic[visit_object_id]["LCN"]
+        visit_object_id_vcn = lcn_to_vcn(cluster_size, container_size, visit_object_id_lcn, container_table_key_dic)
+        lower_file_table_of_current_directory_dic = read_currnet_directory_table(image_file, visit_object_id_vcn, cluster_size, container_table_key_dic, object_id_table_lcn_dic, visit_object_id)
+        
+        current_directory_tree_dic = add_file_table_of_current_directory_tree_dic(current_directory_tree_dic, lower_file_table_of_current_directory_dic)
+        
+        print(f"{lower_file_table_of_current_directory_dic}\n{current_directory_tree_dic}")
+        
+        print_current_tree(current_directory_tree_dic)
+        
+        visit_object_id = input(f'\nEnter visited object id (hex) or "exit" to quit : ')
+        
+        if visit_object_id.lower() == 'exit':
+            print(f"\nExiting the program.")
+            break
+        
+        visit_object_id = int(visit_object_id, 16)
+
+def read_currnet_directory_table(image_file, base_cluster, cluster_size, container_table_key_dic, object_id_table_lcn_dic, directory_object_id = 0x600):
     image_file.seek(base_cluster * cluster_size)
 
     page_header = read_struct(image_file, PAGE_HEADER_STRUCTURE)
@@ -130,9 +156,10 @@ def read_directory_table(image_file, base_cluster, cluster_size, container_table
         else:
             sys.exit(f"This block is not Table.\n")
     
-    return read_index(image_file, base_cluster, cluster_size, "Directory Table", container_table_key_dic, object_id_table_lcn_dic, prefix, connector)
+    # Return Type of Four Variable - | File Name | File LCN | File Object ID |
+    return read_index(image_file, base_cluster, cluster_size, "Directory Table", container_table_key_dic, object_id_table_lcn_dic)
 
-def read_index(image_file, base_cluster, cluster_size, table_type, container_table_key_dic, object_id_table_lcn_dic, prefix = None, connector = None):
+def read_index(image_file, base_cluster, cluster_size, table_type, container_table_key_dic, object_id_table_lcn_dic):
     image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE))  # Move to Index Root
 
     index_root = read_struct(image_file, INDEX_ROOT_STRUCTURE)
@@ -142,6 +169,7 @@ def read_index(image_file, base_cluster, cluster_size, table_type, container_tab
     number_of_entries = index_header[6]
     image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE) + index_root[0] + index_header[5])  # Move to Index Key (+ Index Header)
 
+    lower_file_table_of_current_directory = {}
     for key in range(number_of_entries):
         image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE) + index_root[0] + index_header[5] + (key * 0x04))  # Move to Each Index Key Entry (+ Index Header, Index Key)
 
@@ -192,22 +220,14 @@ def read_index(image_file, base_cluster, cluster_size, table_type, container_tab
             parent_directory_vcn = lcn_to_vcn(cluster_size, container_size, parent_directory_lcn, container_table_key_dic)
             child_directory_vcn = lcn_to_vcn(cluster_size, container_size, child_directory_lcn, container_table_key_dic)
 
+            # Save Root Directory VCN
+            if (int(parent_directory_object_id) == 0x600):
+                global root_vcn; root_vcn = parent_directory_vcn
+
             # Save Parent Child Table Dictionary
-            parent_child_table_dic[key] = {
-                "parent_directory_object_id": int(parent_directory_object_id),
-                "parent_directory_vcn": int(parent_directory_vcn),
-                "child_directory_object_id": int(child_directory_object_id),
-                "child_directory_vcn": int(child_directory_vcn)
-            }
-
-            # Store File System Directory Tree
-            build_and_store_directory_hierarchy_tree()
-
-            # Print File System Directory Tree
-            create_parent_child_relationship()
-
-            # See Building File Systsem Directory Tree
-            time.sleep(0.3)
+            if int(parent_directory_object_id) not in master_directory_tree_dic:
+                master_directory_tree_dic[int(parent_directory_object_id)] = []
+            master_directory_tree_dic[int(parent_directory_object_id)].append((int(child_directory_object_id), int(child_directory_vcn)))
 
         elif (table_type == "Directory Table"):  # Table Type is Directory Table
             image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE) + index_root[0] + index_key + index_entry[1])  # Move to Index Entry Value (+ Index Header, Index Entry)
@@ -219,8 +239,9 @@ def read_index(image_file, base_cluster, cluster_size, table_type, container_tab
 
                 image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE) + index_root[0] + index_key + index_entry[4])  # Move to Index Entry Value (+ Index Header, Index Entry)
                 index_entry_value = read_struct(image_file, FILE_TABLE_NAME_STRUCTURE)
-                
-                # print(f"{prefix}{connector} File {hex(index_entry_key[1])}, {hex(index_entry_value[1])}, {index_entry_value[2]}")
+
+                # Return Type of Four Variable - | File Name | File LCN | File Object ID |
+                lower_file_table_of_current_directory[key] = {'file_name': index_entry_value[2], 'file_lcn': hex(index_entry_key[1]), 'file_object_id': hex(index_entry_key[1])}
 
             elif (index_entry_key[0] == 0x20030):  # This Index Entry is 'Directory Table'
                 image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE) + index_root[0] + index_key + index_entry[1])  # Move to Index Entry Key (+ Index Header, Index Entry)
@@ -228,76 +249,142 @@ def read_index(image_file, base_cluster, cluster_size, table_type, container_tab
 
                 image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE) + index_root[0] + index_key + index_entry[4])  # Move to Index Entry Value (+ Index Header, Index Entry)
                 index_entry_value = read_struct(image_file, DIRECTORY_TABLE_METADATA_STRUCTURE)
-                
-                # print(f"{prefix}{connector} Dir {hex(index_entry_value[1])}, {index_entry_key[1]}")
+    
+    # Return Type of Four Variable - | File Name | File LCN | File Object ID |
+    return lower_file_table_of_current_directory
 
-def build_and_store_directory_hierarchy_tree():
-    parent_ids = set(v['parent_directory_object_id'] for v in parent_child_table_dic.values())
-    child_ids = set(v['child_directory_object_id'] for v in parent_child_table_dic.values())
+def build_current_tree(master_directory_tree_dic, current_directory_tree_dic, visit_object_id=0x600):
+    def in_current_tree(visit_object_id):
+        if visit_object_id in current_directory_tree_dic:
+            return True
+        for child_list in current_directory_tree_dic.values():
+            if isinstance(child_list, list) and any(child_directory_object_id == visit_object_id for child_directory_object_id, _, _ in child_list):
+                return True
+        return False
 
-    root_ids = parent_ids - child_ids
+    def find_path(root_object_id, visit_object_id):
+        if root_object_id == visit_object_id:
+            return [root_object_id]
+        for (child, _) in master_directory_tree_dic.get(root_object_id, []):
+            sub = find_path(child, visit_object_id)
+            if sub:
+                return [root_object_id] + sub
+        return None
 
-    def build_subtree(parent_id):
-        subtree = {}
-        for entry in parent_child_table_dic.values():
-            if entry["parent_directory_object_id"] == parent_id:
-                subtree['vcn'] = entry["parent_directory_vcn"]
-                break
-        subtree['children'] = {}
+    if (not visit_object_id) or (visit_object_id == 0x600):
+        current_directory_tree_dic.clear()
+        if 0x600 in master_directory_tree_dic:
+            current_directory_tree_dic[0x600] = [(c, v, False) for (c, v) in master_directory_tree_dic[0x600]]
+        current_directory_tree_dic['root_marked'] = True
+        return current_directory_tree_dic
 
-        for entry in parent_child_table_dic.values():
-            if entry["parent_directory_object_id"] == parent_id:
-                c_id = entry["child_directory_object_id"]
-                c_vcn = entry["child_directory_vcn"]
-                subtree['children'][c_id] = {
-                    'vcn': c_vcn,
-                    'children': build_subtree(c_id)['children']
-                }
-        return subtree
+    if not in_current_tree(visit_object_id):
+        print(f'Enter only the Currently Displayed Object ID Information.\n')
 
-    result_tree = {}
-    for r_id in root_ids:
-        result_tree[r_id] = build_subtree(r_id)
+        def find_marked_object_id(current_directory_tree_dic):
+            if 'root_marked' in current_directory_tree_dic and current_directory_tree_dic['root_marked']:
+                for key, children in current_directory_tree_dic.items():
+                    if key == 'root_marked':
+                        continue
+                    return key
 
-    hierarchy_data_storage.append(result_tree)
+            for key, children in current_directory_tree_dic.items():
+                if key == 'root_marked':
+                    continue
+                for (child_id, vcn, marked) in children:
+                    if marked:
+                        return child_id
 
-def create_parent_child_relationship():
-    os.system('cls' if os.name == 'nt' else 'clear')  # Windows OS
-
-    # Save all of 'Directory Object ID' to 'Set'
-    parent_directory_object_id_set = set(entry['parent_directory_object_id'] for entry in parent_child_table_dic.values())
-    child_directory_object_id_set = set(entry['child_directory_object_id'] for entry in parent_child_table_dic.values())
-
-    # Select Root Directory Object ID ('Parent Directory Object ID' - 'Child Directory Object ID')
-    root_directory_object_id_set = parent_directory_object_id_set - child_directory_object_id_set
-
-    def print_tree(parent_directory_object_id, prefix=''):
-        child_directory_object_id_list = [v for v in parent_child_table_dic.values() if v['parent_directory_object_id'] == parent_directory_object_id]
-
-        for num, child_directory_object_id in enumerate(child_directory_object_id_list):  # Print All of Node Under Current Node
-            connector = '└─' if num == len(child_directory_object_id_list) - 1 else '├─'  # IF Current Node is Last Node -> '└─' else '├─'
-            
-            # Print Current Node Information
-            print(f"{prefix}{connector}", end=" ")
-            print(f"{hex(child_directory_object_id['child_directory_object_id'])}, {hex(child_directory_object_id['child_directory_vcn'])}")
-
-            new_prefix = prefix + ('    ' if num == len(child_directory_object_id_list)-1 else '│   ')  # Create New Node -> IF Current Node is Last Node -> 'NULL' else '│'
-            print_tree(child_directory_object_id['child_directory_object_id'], new_prefix)
-
-    for root_directory_object_id in root_directory_object_id_set:
-        # Select VCN of Root Directory Object ID
-        root_directory_object_id_vcn = "N/A"  # Default Value
-        for entry in parent_child_table_dic.values():
-            if entry["parent_directory_object_id"] == root_directory_object_id:
-                root_directory_object_id_vcn = entry["parent_directory_vcn"]
-                break
+            return None
         
-        # Print Root Node Information
-        print(f"", end=" ")
-        print(f"{hex(root_directory_object_id)}, {hex(root_directory_object_id_vcn)}")
+        true_object_id = find_marked_object_id(current_directory_tree_dic)
+        current_directory_tree_dic = build_current_tree(master_directory_tree_dic, current_directory_tree_dic, true_object_id)
+        return current_directory_tree_dic
 
-        print_tree(root_directory_object_id)  # Print All Node Calling Recursive Function
-        print()
+    path = find_path(0x600, visit_object_id)
+    if not path:
+        return current_directory_tree_dic
+
+    new_dic = {}
+    for i in range(len(path) - 1):
+        node = path[i]
+        next_node = path[i+1]
+        for (child_id, vcn) in master_directory_tree_dic.get(node, []):
+            if child_id == next_node:
+                new_dic[node] = [(child_id, vcn, False)]
+                break
+
+    last = path[-1]
+    new_dic[last] = [(child_id, vcn, False) for (child_id, vcn) in master_directory_tree_dic.get(last, [])]
+
+    if len(path) >= 2:
+        parent_of_last = path[-2]
+        tmp = []
+        for (c, v, marked) in new_dic[parent_of_last]:
+            if c == last:
+                tmp.append((c, v, True))
+            else:
+                tmp.append((c, v, False))
+        new_dic[parent_of_last] = tmp
+
+    return new_dic
+
+def add_file_table_of_current_directory_tree_dic(current_directory_tree_dic, lower_file_table_of_current_directory_dic):
+    if 'root_marked' in current_directory_tree_dic and current_directory_tree_dic['root_marked']:
+        if 0x600 not in current_directory_tree_dic:
+            current_directory_tree_dic[0x600] = []
+        for key, val in lower_file_table_of_current_directory_dic.items():
+            file_name = val['file_name']
+            file_lcn = val['file_lcn']
+            file_object_id = val['file_object_id']
+            current_directory_tree_dic[0x600].append((file_name, file_lcn, file_object_id))
+    for parent_id, children in list(current_directory_tree_dic.items()):
+        if parent_id == 'root_marked':
+            continue
+        for (child_id, vcn, marked) in children:
+            if not isinstance(child_id, int):
+                continue
+            if marked:
+                if child_id in current_directory_tree_dic:
+                    for _, val in lower_file_table_of_current_directory_dic.items():
+                        file_name = val['file_name']
+                        file_lcn = val['file_lcn']
+                        file_object_id = val['file_object_id']
+                        current_directory_tree_dic[child_id].append((file_name, file_lcn, file_object_id))
+                else:
+                    current_directory_tree_dic[child_id] = []
+                    for _, val in lower_file_table_of_current_directory_dic.items():
+                        file_name = val['file_name']
+                        file_lcn = val['file_lcn']
+                        file_object_id = val['file_object_id']
+                        current_directory_tree_dic[child_id].append((file_name, file_lcn, file_object_id))
+    return current_directory_tree_dic
+
+def print_current_tree(current_directory_tree_dic):
+    def print_tree(dic, node, prefix="", is_last=True):
+        children = dic.get(node, [])
+        for i, entry in enumerate(children):
+            is_last_child = (i == len(children) - 1)
+            connector = "└─" if is_last_child else "├─"
+            if len(entry) == 3:
+                first, second, third = entry
+                if isinstance(third, bool):
+                    child_id, vcn, marked = first, second, third
+                    mark_str = " <-" if marked else ""
+                    child_id_str = hex(child_id) if isinstance(child_id, int) else str(child_id)
+                    vcn_str = hex(vcn) if isinstance(vcn, int) else str(vcn)
+                    print(f"{prefix}{connector} {child_id_str}, {vcn_str}{mark_str}")
+                    print_tree(dic, child_id, prefix + ("   " if is_last_child else "│  "), is_last_child)
+                else:
+                    file_name, file_lcn, file_object_id = first, second, third
+                    print(f"{prefix}{connector} {file_name}, {file_lcn}, {file_object_id}")
+
+    if 'root_marked' in current_directory_tree_dic and current_directory_tree_dic['root_marked']:
+        print(f"{hex(0x600)}, {hex(root_vcn)} <-")
+    else:
+        print(f"{hex(0x600)}, {hex(root_vcn)}")
+    if 0x600 in current_directory_tree_dic:
+        print_tree(current_directory_tree_dic, 0x600)
 
 def lcn_to_vcn(cluster_size, container_size, lcn, container_table_key_dic):
     clusters_per_container = int(container_size / cluster_size)  # CPC = Clusters Per Container
@@ -358,6 +445,9 @@ if __name__ == "__main__":
         # for key, value in object_id_table_lcn_dic.items():
             # print(f"Key: {hex(key)}, LCN: {hex(value["LCN"])}")
         
-        # Parent Child Table -> Itinerate Parent Child Table -> Create Directory Tree with Directory and File Metadata.
+        # Parent Child Table -> Itinerate Parent Child Table -> Create All of Directory Tree in File System.
         parent_child_table_vcn = lcn_to_vcn(cluster_size, container_size, parent_child_table_lcn, container_table_key_dic)
         read_parent_child_table(image_file, parent_child_table_vcn, cluster_size, container_table_key_dic, object_id_table_lcn_dic)
+
+        # Read Directory Tree in File System based on User Input.
+        traversing_directory_hierarchy(image_file, base_cluster, cluster_size, container_table_key_dic, object_id_table_lcn_dic)
