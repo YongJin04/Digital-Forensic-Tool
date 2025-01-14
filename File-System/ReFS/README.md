@@ -24,8 +24,8 @@ It provides functionality to parse and interpret key data structures in an ReFS-
 ### Clone the Repository
 
 ```bash
-git https://github.com/YongJin04/Digital-Forensic-Tool.git
-cd File-System/ReFS
+git clone https://github.com/YongJin04/Digital-Forensic-Tool.git
+cd \Digital-Forensic-Tool\File-System\ReFS
 ```
 
 ## Usage
