@@ -16,10 +16,12 @@ PAGE_HEADER_STRUCTURE = '<IIIIQQQQQQQQ'  # Size : 0x50 / <IIII QQ QQ QQ QQ
 PAGE_REFERENCE_STRUCTURE = '<QQQQHBBHHQ'  # Size : 0x30 / <QQ QQ HBBHHQ
 
 FILE_TABLE_NAME_STRUCTURE = '<HH'  # Size : 0x04 / <I (+ File Name Field)
+FILE_TABLE_TIME_SIZE_STRUCTURE = '<QQQQIIQQQQQIIQQQ'  # Size : 0x70 / <QQ QQ IIQ QQ QQ IIQ QQ
+FILE_TABLE_SIZE_STRUCTURE = '<I12s16s16sIIQQ' # Size : 0x48 / <I12s 16s 16s IIQ Q
+FILE_TABLE_DATARUN_STRUCTURE = '<QHHQI'  # Size : 0x18 / <QHHQ I
 
 DIRECTORY_TABLE_NAME_STRUCTURE = '<I'  # Size : 0x04 / <I (+ Directory Name Field)
 DIRECTORY_TABLE_METADATA_STRUCTURE = '<QQQQQQ'  # Size : 0x30 / <QQ QQ QQ
-STRUCTURE = '<'  # Size : 0x / <
 
 INDEX_ROOT_STRUCTURE = '<IH6sHHH6sQQ'  # Size : 0x28 / <IH6sHH H6sQ Q
 INDEX_HEADER_STRUCTURE = '<IIIB3sIIQII'  # Size : 0x28 / <IIIB3s IIQ II
@@ -86,6 +88,7 @@ def read_container_table(image_file, base_cluster, cluster_size):
         sys.exit(f"This block is not Container Table.\n")
     
     container_table_key_dic = {}
+    image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE))  # Move to Index Root
     read_index(image_file, base_cluster, cluster_size, "Container Table", container_table_key_dic, None)
 
     return container_table_key_dic
@@ -99,6 +102,7 @@ def read_object_id_table(image_file, base_cluster, cluster_size, container_table
         sys.exit(f"This block is not Object ID Table.\n")
     
     object_id_table_lcn_dic = {}
+    image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE))  # Move to Index Root
     read_index(image_file, base_cluster, cluster_size, "Object ID Table", container_table_key_dic, object_id_table_lcn_dic)
 
     return object_id_table_lcn_dic
@@ -113,7 +117,7 @@ def read_parent_child_table(image_file, base_cluster, cluster_size, container_ta
 
     # Declar Parent Child Table Global Dictionary
     global master_directory_tree_dic; master_directory_tree_dic = {}
-    
+    image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE))  # Move to Index Root
     read_index(image_file, base_cluster, cluster_size, "Parent Child Table", container_table_key_dic, object_id_table_lcn_dic)
 
 def traversing_directory_hierarchy(image_file, base_cluster, cluster_size, container_table_key_dic, object_id_table_lcn_dic):
@@ -128,7 +132,7 @@ def traversing_directory_hierarchy(image_file, base_cluster, cluster_size, conta
     directory_stack = [visit_object_id]
 
     # Clean Up Screen
-    os.system('cls' if os.name == 'nt' else 'clear')
+    # os.system('cls' if os.name == 'nt' else 'clear')
     
     while True:
         # Convert 'Directory Object ID' -> 'LCN' -> 'VCN'
@@ -145,13 +149,41 @@ def traversing_directory_hierarchy(image_file, base_cluster, cluster_size, conta
                 new_index = max(lower_directory_table_of_current_directory_dic.keys(), default=0) + 1
                 lower_directory_table_of_current_directory_dic[new_index] = {'directory_name': f'Unknown (Object ID :{hex(child_object_id)})', 'directory_object_id': child_object_id, 'last_access_time': 'Unknown'}
 
-        print(f"master_directory_tree_dic : {master_directory_tree_dic}, lower_file_table_of_current_directory_dic : {lower_file_table_of_current_directory_dic}, lower_directory_table_of_current_directory_dic : {lower_directory_table_of_current_directory_dic}")
+        # print(f"master_directory_tree_dic : {master_directory_tree_dic}, lower_file_table_of_current_directory_dic : {lower_file_table_of_current_directory_dic}, lower_directory_table_of_current_directory_dic : {lower_directory_table_of_current_directory_dic}")
 
-        # Print File and Directory Table Information Lower of Current Directory Object ID
-        for key, value in lower_directory_table_of_current_directory_dic.items():
-            print(f"d  {value.get('directory_name')}, {convert_filesystem_time(value.get('last_access_time'))}")
-        for key, value in lower_file_table_of_current_directory_dic.items():
-            print(f"f {value.get('file_name')}")
+        def read_file_signature(image_file, file_vcn, cluster_size):
+            # Read File Signature Foramt By Hex
+            image_file.seek(file_vcn * cluster_size)
+            hex_value = read_struct(image_file, '<I')
+            
+            return hex_value[0]
+
+        # Print File and Directory Table Info in Lower of Current Directory
+        def print_directory_and_file_info(directory_dic, file_dic):
+            header = f"{'Type':<4} {'Name':<25} {'LogicalSize':<12} {'LastWriteTime':<20} {'Signature (VCN)':<20}"
+            separator = "-" * len(header)
+
+            print(header)
+            print(separator)
+
+            for key, value in directory_dic.items():
+                dir_name = value.get('directory_name', 'Unknown')
+                last_write_time = convert_filesystem_time(value.get('last_access_time', 'Unknown'))
+                print(f"{'d':<4} {dir_name:<25} {'':<12} {last_write_time:<20} {'':<20}")
+            
+            for key, value in file_dic.items():
+                file_name = value.get('file_name', 'Unknown')
+                logical_size = value.get('file_logical_size', 0)
+                last_write_time = convert_filesystem_time(value.get('file_last_access_time', 'Unknown'))
+                file_lcn = value.get('file_lcn', 0)
+                
+                file_vcn = lcn_to_vcn(cluster_size, container_size, file_lcn, container_table_key_dic)
+                hex_signature = read_file_signature(image_file, file_vcn, cluster_size)
+                signature_and_vcn = f"{hex(hex_signature)} ({hex(file_vcn)})"
+
+                print(f"{'f':<4} {file_name:<25} {logical_size:<12} {last_write_time:<20} {signature_and_vcn:<20}")
+            
+        print_directory_and_file_info(lower_directory_table_of_current_directory_dic, lower_file_table_of_current_directory_dic)
 
         # Input User Directory Name
         directory_name = input(f'\n{current_work_directory}> ')
@@ -194,37 +226,45 @@ def read_currnet_directory_table(image_file, base_cluster, cluster_size, contain
             sys.exit(f"This block is not Table.\n")
     
     # Return Type of Four Variable - | File Name | File LCN | File Object ID | / | Directory Name | Directory Object ID | Directory Last Access Time |
+    image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE))  # Move to Index Root
     return read_index(image_file, base_cluster, cluster_size, "Directory Table", container_table_key_dic, object_id_table_lcn_dic)
 
 def read_index(image_file, base_cluster, cluster_size, table_type, container_table_key_dic, object_id_table_lcn_dic):
-    image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE))  # Move to Index Root
+    base_entry_offset_in_cluster = image_file.tell()
 
     index_root = read_struct(image_file, INDEX_ROOT_STRUCTURE)
-    image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE) + index_root[0])  # Move to Index Header
+    if (table_type == "File Table"):
+        file_table_time_size = read_struct(image_file, FILE_TABLE_TIME_SIZE_STRUCTURE)
+
+        # print(f"File Last Access Time : {convert_filesystem_time(file_table_time_size[3])}, Logical Size : {hex(file_table_time_size[7])}")
+        global file_last_access_time; file_last_access_time = file_table_time_size[3]
+
+    image_file.seek(base_entry_offset_in_cluster + index_root[0])  # Move to Index Header
 
     index_header = read_struct(image_file, INDEX_HEADER_STRUCTURE)
     number_of_entries = index_header[6]
-    image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE) + index_root[0] + index_header[5])  # Move to Index Key (+ Index Header)
+    image_file.seek(base_entry_offset_in_cluster + index_root[0] + index_header[5])  # Move to Index Key (+ Index Header)
 
     lower_file_table_of_current_directory = {}
     lower_directory_table_of_current_directory = {}
     for key in range(number_of_entries):
-        image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE) + index_root[0] + index_header[5] + (key * 0x04))  # Move to Each Index Key Entry (+ Index Header, Index Key)
+        image_file.seek(base_entry_offset_in_cluster + index_root[0] + index_header[5] + (key * 0x04))  # Move to Each Index Key Entry (+ Index Header, Index Key)
 
         index_key = (read_struct(image_file, INDEX_KEY_STRUCTURE)[0] & 0xFFFF)  # Return Lower 2 Byte
-        image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE) + index_root[0] + index_key)  # Move to Index Entry (+ Index Header)
+        image_file.seek(base_entry_offset_in_cluster + index_root[0] + index_key)  # Move to Index Entry (+ Index Header)
         
         index_entry = read_struct(image_file, INDEX_ENTRY_STRUCTURE)
         
         # Compair Current Table Type
         if (table_type == "Container Table"):  # Table Type is Container Table
-            image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE) + index_root[0] + index_key + index_entry[4])  # Move to Index Entry Value (+ Index Header, Index Entry)
+            image_file.seek(base_entry_offset_in_cluster + index_root[0] + index_key + index_entry[4])  # Move to Index Entry Value (+ Index Header, Index Entry)
 
             page_reference = read_struct(image_file, PAGE_REFERENCE_STRUCTURE)
+            image_file.seek(page_reference[0] * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE))  # Move to Index Root
             read_index(image_file, page_reference[0], cluster_size, "Container Table Key-Value", container_table_key_dic, None)
     
         elif (table_type == "Container Table Key-Value"):  # Table Type is Container Table Key-Value
-            image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE) + index_root[0] + index_key + index_entry[4])  # Move to Index Entry Value (+ Index Header, Index Entry)
+            image_file.seek(base_entry_offset_in_cluster + index_root[0] + index_key + index_entry[4])  # Move to Index Entry Value (+ Index Header, Index Entry)
             container_table = read_struct(image_file, CONTAINER_TABLE_STRUCTURE)
 
             container_table_key_dic[container_table[0]] = {  # Entry Key
@@ -232,7 +272,7 @@ def read_index(image_file, base_cluster, cluster_size, table_type, container_tab
             }
 
         elif (table_type == "Object ID Table"):  # Table Type is Object ID Table
-            image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE) + index_root[0] + index_key + index_entry[1])  # Move to Index Entry Key (+ Index Header, Index Entry)
+            image_file.seek(base_entry_offset_in_cluster + index_root[0] + index_key + index_entry[1])  # Move to Index Entry Key (+ Index Header, Index Entry)
             object_id_table_key = read_struct(image_file, OBJECT_ID_TABLE_KEY_STRUCTURE)
             
             image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE) + index_root[0] + index_key + index_entry[4])  # Move to Index Entry Value (+ Index Header, Index Entry)
@@ -244,7 +284,7 @@ def read_index(image_file, base_cluster, cluster_size, table_type, container_tab
             }
         
         elif (table_type == "Parent Child Table"):  # Table Type is Parent Child Table
-            image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE) + index_root[0] + index_key)  # Move to Index Entry (+ Index Header)
+            image_file.seek(base_entry_offset_in_cluster + index_root[0] + index_key)  # Move to Index Entry (+ Index Header)
             parent_child_table_key = read_struct(image_file, PARENT_CHILD_TABLE_STRUCTURE)
 
             parent_directory_object_id = parent_child_table_key[3]
@@ -268,17 +308,29 @@ def read_index(image_file, base_cluster, cluster_size, table_type, container_tab
             master_directory_tree_dic[int(parent_directory_object_id)].append((int(child_directory_object_id), int(child_directory_vcn)))
 
         elif (table_type == "Directory Table"):  # Table Type is Directory Table
-            image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE) + index_root[0] + index_key + index_entry[1])  # Move to Index Entry Value (+ Index Header, Index Entry)
+            image_file.seek(base_entry_offset_in_cluster + index_root[0] + index_key + index_entry[1])  # Move to Index Entry Value (+ Index Header, Index Entry)
             index_entry_key = read_struct(image_file, INDEX_KEY_STRUCTURE)
 
             if (index_entry_key[0] == 0x10030):  # This Index Entry is 'File Table'
-                image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE) + index_root[0] + index_key + index_entry[1])  # Move to Index Entry Key (+ Index Header, Index Entry)
+                image_file.seek(base_entry_offset_in_cluster + index_root[0] + index_key + index_entry[1])  # Move to Index Entry Key (+ Index Header, Index Entry)
                 index_entry_key = read_struct(image_file, FILE_TABLE_NAME_STRUCTURE, int(index_entry[2]))
 
-                # 여기에 File에 대한 세부 Metadata 읽는 로직을 추가해야함.
+                # Parse File Metadata (Time, LCN, Logical Size) in File Table
+                image_file.seek(base_entry_offset_in_cluster + index_root[0] + index_key + index_entry[4])  # Move to Index Entry Value (+ Index Header, Index Entry)
+                global current_file_meta_table_of_directory; current_file_meta_table_of_directory = {}
+                read_index(image_file, base_cluster, cluster_size, "File Table", container_table_key_dic, object_id_table_lcn_dic)
+
+                # print(f"current_file_meta_table_of_directory: {current_file_meta_table_of_directory}")
 
                 # Return Type of Four Variable - | File Name | File LCN | File Object ID |
-                lower_file_table_of_current_directory[key] = {'file_name': index_entry_key[2].replace('\x00', '')}
+                lower_file_table_of_current_directory[key] = {
+                    'file_name': index_entry_key[2].replace('\x00', ''),
+                    'file_last_access_time': current_file_meta_table_of_directory[0]['file_last_access_time'],
+                    'file_lcn': current_file_meta_table_of_directory[0]['file_lcn'],
+                    'file_logical_size': current_file_meta_table_of_directory[0]['file_logical_size']
+                }
+
+                # print(lower_file_table_of_current_directory[key])
 
             elif (index_entry_key[0] == 0x20030):  # This Index Entry is 'Directory Table'
                 image_file.seek(base_cluster * cluster_size + struct.calcsize(PAGE_HEADER_STRUCTURE) + index_root[0] + index_key + index_entry[1])  # Move to Index Entry Key (+ Index Header, Index Entry)
@@ -289,7 +341,23 @@ def read_index(image_file, base_cluster, cluster_size, table_type, container_tab
 
                 # Return Type of Four Variable - | Directory Name | Directory Object ID | Directory Last Access Time |
                 lower_directory_table_of_current_directory[key] = {'directory_name': index_entry_key[1].replace('\x00', ''), 'directory_object_id': index_entry_value[1], 'last_access_time': index_entry_value[5]}
-    
+        
+        elif (table_type == "File Table"):  # Table Type is Directory Table
+            image_file.seek(base_entry_offset_in_cluster + index_root[0] + index_key + index_entry[4])  # Move to Index Entry Value (+ Index Header, Index Entry)
+            file_table_size = read_struct(image_file, FILE_TABLE_SIZE_STRUCTURE)
+            
+            if (file_table_time_size[7] == file_table_size[6]) and (file_table_size[6] == file_table_size[7]):
+                
+                # Read Cluster Run
+                image_file.seek(base_entry_offset_in_cluster + index_root[0] + index_key + index_entry[4] + file_table_size[0])  # Move to Index Entry Value (+ Index Header, Index Entry)
+                file_table_datarun_metadata = read_struct(image_file, '<I')
+
+                image_file.seek(base_entry_offset_in_cluster + index_root[0] + index_key + index_entry[4] + file_table_size[0] + file_table_datarun_metadata[0])  # Move to Index Entry Value (+ Index Header, Index Entry)
+                file_table_datarun = read_struct(image_file, FILE_TABLE_DATARUN_STRUCTURE)
+                if (file_table_size[4] == (file_table_datarun[4] * cluster_size)):
+                    # print(f"File LCN : {hex(file_table_datarun[0])}")
+                    current_file_meta_table_of_directory[0] = {'file_last_access_time': file_last_access_time, 'file_logical_size': file_table_size[6], 'file_lcn': file_table_datarun[0]}
+
     # Return Type of Four Variable - | File Name | File LCN | File Object ID | / | Directory Name | Directory Object ID | Directory Last Access Time |
     return lower_file_table_of_current_directory, lower_directory_table_of_current_directory
 
@@ -369,3 +437,4 @@ if __name__ == "__main__":
 
         # Read Directory Tree in File System based on User Input.
         traversing_directory_hierarchy(image_file, base_cluster, cluster_size, container_table_key_dic, object_id_table_lcn_dic)
+    
